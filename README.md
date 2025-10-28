@@ -20,7 +20,7 @@
 It provides users with intuitive access to core financial features like **Deposits, Withdrawals, Transfers, and Statements** — all managed through a responsive dashboard interface.
 
 <p align="center">
-  <img src="https://i.imgur.com/d2K5dA7.png" width="800" alt="Dashboard UI Preview"/>
+  <img src="https://www.google.com/url?sa=i&url=https%3A%2F%2Fdribbble.com%2Ftags%2Fmobile-banking&psig=AOvVaw3WohmFzCpvM5pPFDkPTRCQ&ust=1761738142199000&source=images&cd=vfe&opi=89978449&ved=0CBUQjRxqFwoTCPi8-ZroxpADFQAAAAAdAAAAABAE"/>
 </p>
 
 ---
