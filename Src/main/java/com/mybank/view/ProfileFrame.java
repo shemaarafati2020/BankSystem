@@ -1,5 +1,6 @@
 package com.mybank.view;
 
+import com.mybank.dao.UserDAO;
 import com.mybank.model.User;
 
 import javax.swing.*;
@@ -9,12 +10,19 @@ import java.io.File;
 public class ProfileFrame extends JFrame {
     private final User user;
     private final DashboardFrame parent;
+    private JTextField nameField;
+    private JTextField emailField;
+    private JTextField phoneField;
+    private JTextField addressField;
+    private JLabel photoLabel;
+    private File selectedPhoto;
+    private JLabel statusLabel;
 
     public ProfileFrame(User user, DashboardFrame parent) {
         this.user = user;
         this.parent = parent;
         setTitle("MyBank Pro - Profile Settings");
-        setSize(500, 400);
+        setSize(520, 420);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         init();
@@ -22,52 +30,92 @@ public class ProfileFrame extends JFrame {
 
     private void init() {
         JPanel mainPanel = new JPanel(new BorderLayout());
-        JPanel formPanel = new JPanel(new GridLayout(5, 2, 10, 10));
+        JPanel formPanel = new JPanel(new GridBagLayout());
         formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(8, 8, 8, 8);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.gridx = 0;
+        gbc.gridy = 0;
 
-        JTextField nameField = new JTextField(user.getFullName());
-        JTextField emailField = new JTextField(user.getEmail());
-        JTextField phoneField = new JTextField(user.getPhone());
-        JLabel photoLabel = new JLabel(user.getPhotoPath() == null ? "No photo uploaded" : user.getPhotoPath());
+        nameField = new JTextField(user.getFullName());
+        emailField = new JTextField(user.getEmail());
+        phoneField = new JTextField(user.getPhone());
+        addressField = new JTextField(user.getAddress());
+
+        addRow(formPanel, gbc, "Full Name:", nameField);
+        addRow(formPanel, gbc, "Email:", emailField);
+        addRow(formPanel, gbc, "Phone:", phoneField);
+        addRow(formPanel, gbc, "Address:", addressField);
+
         JButton browseBtn = new JButton("Upload Photo");
+        photoLabel = new JLabel(user.getPhoto() == null || user.getPhoto().isEmpty() ? "No photo uploaded" : user.getPhoto());
+        browseBtn.addActionListener(e -> choosePhoto());
 
-        formPanel.add(new JLabel("Full Name:"));
-        formPanel.add(nameField);
-        formPanel.add(new JLabel("Email:"));
-        formPanel.add(emailField);
-        formPanel.add(new JLabel("Phone:"));
-        formPanel.add(phoneField);
-        formPanel.add(new JLabel("Profile Photo:"));
-        formPanel.add(photoLabel);
+        gbc.gridx = 0;
+        gbc.gridy++;
+        formPanel.add(new JLabel("Profile Photo:"), gbc);
+        gbc.gridx = 1;
+        JPanel photoPanel = new JPanel(new BorderLayout(6, 6));
+        photoPanel.add(browseBtn, BorderLayout.WEST);
+        photoPanel.add(photoLabel, BorderLayout.CENTER);
+        formPanel.add(photoPanel, gbc);
 
-        JPanel btnPanel = new JPanel();
-        JButton saveBtn = new JButton("Save");
+        statusLabel = new JLabel(" ");
+        statusLabel.setForeground(new Color(0x2F3E46));
+
+        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton saveBtn = new JButton("Save Changes");
         JButton cancelBtn = new JButton("Cancel");
-        btnPanel.add(saveBtn);
+        btnPanel.add(statusLabel);
         btnPanel.add(cancelBtn);
+        btnPanel.add(saveBtn);
 
         mainPanel.add(formPanel, BorderLayout.CENTER);
         mainPanel.add(btnPanel, BorderLayout.SOUTH);
         add(mainPanel);
 
-        browseBtn.addActionListener(e -> {
-            JFileChooser chooser = new JFileChooser();
-            int result = chooser.showOpenDialog(this);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File file = chooser.getSelectedFile();
-                user.setPhotoPath(file.getAbsolutePath());
-                photoLabel.setText(file.getAbsolutePath());
-            }
-        });
-
-        saveBtn.addActionListener(e -> {
-            user.setFullName(nameField.getText());
-            user.setEmail(emailField.getText());
-            user.setPhone(phoneField.getText());
-            JOptionPane.showMessageDialog(this, "Profile updated successfully!");
-            dispose();
-        });
-
+        saveBtn.addActionListener(e -> saveProfile());
         cancelBtn.addActionListener(e -> dispose());
+    }
+
+    private void addRow(JPanel panel, GridBagConstraints gbc, String label, JComponent field) {
+        gbc.gridx = 0;
+        gbc.gridwidth = 1;
+        panel.add(new JLabel(label), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1;
+        panel.add(field, gbc);
+        gbc.gridy++;
+    }
+
+    private void choosePhoto() {
+        JFileChooser chooser = new JFileChooser();
+        int result = chooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            selectedPhoto = chooser.getSelectedFile();
+            photoLabel.setText(selectedPhoto.getAbsolutePath());
+        }
+    }
+
+    private void saveProfile() {
+        user.setFullName(nameField.getText());
+        user.setEmail(emailField.getText());
+        user.setPhone(phoneField.getText());
+        user.setAddress(addressField.getText());
+        if (selectedPhoto != null) {
+            user.setPhoto(selectedPhoto.getAbsolutePath());
+        }
+
+        UserDAO dao = new UserDAO();
+        boolean ok = dao.updateProfile(user);
+        if (ok) {
+            statusLabel.setText("Profile updated successfully.");
+            parent.refreshBalances();
+        } else {
+            statusLabel.setForeground(Color.RED);
+            statusLabel.setText("Failed to update profile.");
+        }
     }
 }
