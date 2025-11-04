@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 
 public class TransferFrame extends JFrame {
     private final User user;
@@ -19,38 +20,84 @@ public class TransferFrame extends JFrame {
     private JTextField targetUserField;
     private JTextField amountField;
     private JTextArea noteArea;
+    private JComboBox<String> reasonCombo;
+    private JTextField referenceField;
+    private JLabel balanceLabel;
 
     public TransferFrame(User user, DashboardFrame parent) {
         this.user = user;
         this.parent = parent;
         setTitle("Transfer Funds");
-        setSize(420, 320);
+        setSize(480, 400);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         init();
     }
 
     private void init() {
-        JPanel p = new JPanel(new GridLayout(7, 1, 8, 8));
+        JPanel p = new JPanel(new GridBagLayout());
         p.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(6, 6, 6, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.gridx = 0;
+        gbc.gridy = 0;
 
-        p.add(new JLabel("Recipient username:"));
+        balanceLabel = new JLabel("Available balance: " + String.format("USh %,.2f", user.getBalance()));
+        gbc.gridwidth = 2;
+        p.add(balanceLabel, gbc);
+
+        gbc.gridy++;
+        gbc.gridwidth = 1;
+        p.add(new JLabel("Recipient username:"), gbc);
+        gbc.gridx = 1;
         targetUserField = new JTextField();
-        p.add(targetUserField);
+        p.add(targetUserField, gbc);
 
-        p.add(new JLabel("Amount:"));
+        gbc.gridx = 0;
+        gbc.gridy++;
+        p.add(new JLabel("Amount (USh):"), gbc);
+        gbc.gridx = 1;
         amountField = new JTextField();
-        p.add(amountField);
+        p.add(amountField, gbc);
 
-        p.add(new JLabel("Note (optional):"));
-        noteArea = new JTextArea(3, 20);
-        p.add(new JScrollPane(noteArea));
+        gbc.gridx = 0;
+        gbc.gridy++;
+        p.add(new JLabel("Transfer reason:"), gbc);
+        gbc.gridx = 1;
+        reasonCombo = new JComboBox<>(new String[]{
+                "Peer Transfer",
+                "Family Support",
+                "Business Payment",
+                "Loan Settlement",
+                "Other"
+        });
+        p.add(reasonCombo, gbc);
 
+        gbc.gridx = 0;
+        gbc.gridy++;
+        p.add(new JLabel("Reference:"), gbc);
+        gbc.gridx = 1;
+        referenceField = new JTextField();
+        p.add(referenceField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.gridwidth = 2;
+        p.add(new JLabel("Notes:"), gbc);
+
+        gbc.gridy++;
+        noteArea = new JTextArea(4, 20);
+        p.add(new JScrollPane(noteArea), gbc);
+
+        gbc.gridy++;
+        JPanel btns = new JPanel();
         JButton send = new JButton("Send");
         JButton cancel = new JButton("Cancel");
-        JPanel btns = new JPanel();
-        btns.add(send); btns.add(cancel);
-        p.add(btns);
+        btns.add(send);
+        btns.add(cancel);
+        p.add(btns, gbc);
 
         add(p);
 
@@ -62,6 +109,8 @@ public class TransferFrame extends JFrame {
         String targetUsername = targetUserField.getText().trim();
         String amtText = amountField.getText().trim();
         String note = noteArea.getText().trim();
+        String reason = (String) reasonCombo.getSelectedItem();
+        String reference = referenceField.getText().trim();
 
         if (targetUsername.isEmpty() || amtText.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Enter recipient and amount.");
@@ -77,7 +126,6 @@ public class TransferFrame extends JFrame {
             return;
         }
 
-        // find recipient
         UserDAO udao = new UserDAO();
         User recipient = udao.findByUsername(targetUsername);
         if (recipient == null) {
@@ -85,12 +133,19 @@ public class TransferFrame extends JFrame {
             return;
         }
 
-        // perform DB transaction: check sender balance, update both balances, insert tx rows
-        try (Connection c = DBConnection.getConnection()) {
-            try {
-                c.setAutoCommit(false);
+        if (recipient.getUserId() == user.getUserId()) {
+            JOptionPane.showMessageDialog(this, "You cannot transfer to yourself.");
+            return;
+        }
 
-                // Lock and read sender balance
+        String referenceText = reference.isEmpty() ? "" : (" | Ref: " + reference);
+        String senderDescription = reason + " to " + recipient.getUsername() + referenceText + (note.isEmpty() ? "" : " - " + note);
+        String recipientDescription = reason + " from " + user.getUsername() + referenceText + (note.isEmpty() ? "" : " - " + note);
+
+        try (Connection c = DBConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                // Lock sender balance
                 try (PreparedStatement ps = c.prepareStatement("SELECT balance FROM users WHERE user_id = ? FOR UPDATE")) {
                     ps.setInt(1, user.getUserId());
                     try (ResultSet rs = ps.executeQuery()) {
@@ -100,17 +155,44 @@ public class TransferFrame extends JFrame {
                     }
                 }
 
-                // Lock and read recipient balance
-                BigDecimal recipientBal;
+                // Lock recipient
                 try (PreparedStatement ps = c.prepareStatement("SELECT balance FROM users WHERE user_id = ? FOR UPDATE")) {
                     ps.setInt(1, recipient.getUserId());
                     try (ResultSet rs = ps.executeQuery()) {
                         if (!rs.next()) throw new Exception("Recipient account not found.");
-                        recipientBal = rs.getBigDecimal("balance");
                     }
                 }
 
-                // Update balances
+                Integer senderAccountId = null;
+                BigDecimal senderAccountBalance = null;
+                try (PreparedStatement ps = c.prepareStatement("SELECT account_id, balance FROM accounts WHERE user_id = ? ORDER BY account_id LIMIT 1 FOR UPDATE")) {
+                    ps.setInt(1, user.getUserId());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            senderAccountId = rs.getInt("account_id");
+                            senderAccountBalance = rs.getBigDecimal("balance");
+                            if (senderAccountBalance == null) {
+                                senderAccountBalance = BigDecimal.ZERO;
+                            }
+                        }
+                    }
+                }
+
+                Integer recipientAccountId = null;
+                BigDecimal recipientAccountBalance = null;
+                try (PreparedStatement ps = c.prepareStatement("SELECT account_id, balance FROM accounts WHERE user_id = ? ORDER BY account_id LIMIT 1 FOR UPDATE")) {
+                    ps.setInt(1, recipient.getUserId());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            recipientAccountId = rs.getInt("account_id");
+                            recipientAccountBalance = rs.getBigDecimal("balance");
+                            if (recipientAccountBalance == null) {
+                                recipientAccountBalance = BigDecimal.ZERO;
+                            }
+                        }
+                    }
+                }
+
                 try (PreparedStatement up1 = c.prepareStatement("UPDATE users SET balance = balance - ? WHERE user_id = ?")) {
                     up1.setBigDecimal(1, amount);
                     up1.setInt(2, user.getUserId());
@@ -122,37 +204,51 @@ public class TransferFrame extends JFrame {
                     up2.executeUpdate();
                 }
 
-                // Insert transaction rows
-                try (PreparedStatement it = c.prepareStatement("INSERT INTO transactions (user_id, type, amount, description) VALUES (?,?,?,?)")) {
-                    // sender tx (negative amount)
-                    it.setInt(1, user.getUserId());
-                    it.setString(2, "transfer");
-                    it.setBigDecimal(3, amount.negate());
-                    it.setString(4, "To: " + recipient.getUsername() + (note.isEmpty() ? "" : " - " + note));
-                    it.executeUpdate();
+                if (senderAccountId != null && senderAccountBalance != null) {
+                    try (PreparedStatement ps = c.prepareStatement("UPDATE accounts SET balance = ? WHERE account_id = ?")) {
+                        ps.setBigDecimal(1, senderAccountBalance.subtract(amount));
+                        ps.setInt(2, senderAccountId);
+                        ps.executeUpdate();
+                    }
+                }
+                if (recipientAccountId != null && recipientAccountBalance != null) {
+                    try (PreparedStatement ps = c.prepareStatement("UPDATE accounts SET balance = ? WHERE account_id = ?")) {
+                        ps.setBigDecimal(1, recipientAccountBalance.add(amount));
+                        ps.setInt(2, recipientAccountId);
+                        ps.executeUpdate();
+                    }
+                }
 
-                    // recipient tx (positive amount)
-                    it.setInt(1, recipient.getUserId());
-                    it.setString(2, "transfer");
-                    it.setBigDecimal(3, amount);
-                    it.setString(4, "From: " + user.getUsername() + (note.isEmpty() ? "" : " - " + note));
-                    it.executeUpdate();
+                TransactionDAO tdao = new TransactionDAO();
+                Transaction senderTx = new Transaction();
+                senderTx.setUserId(user.getUserId());
+                senderTx.setType("transfer");
+                senderTx.setAmount(amount.negate());
+                senderTx.setDescription(senderDescription);
+                if (!tdao.create(c, senderTx)) {
+                    throw new SQLException("Failed to record sender transfer");
+                }
+
+                Transaction recipientTx = new Transaction();
+                recipientTx.setUserId(recipient.getUserId());
+                recipientTx.setType("transfer");
+                recipientTx.setAmount(amount);
+                recipientTx.setDescription(recipientDescription);
+                if (!tdao.create(c, recipientTx)) {
+                    throw new SQLException("Failed to record recipient transfer");
                 }
 
                 c.commit();
                 JOptionPane.showMessageDialog(this, "Transfer successful.");
                 parent.refreshBalances();
                 dispose();
-
             } catch (Exception ex) {
                 c.rollback();
-                ex.printStackTrace();
                 JOptionPane.showMessageDialog(this, "Transfer failed: " + ex.getMessage());
             } finally {
                 c.setAutoCommit(true);
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
             JOptionPane.showMessageDialog(this, "Transfer failed: " + ex.getMessage());
         }
     }

@@ -11,7 +11,6 @@ public class User {
     private String photo;
     private String role;      // e.g., "customer", "admin"
     private double balance;
-    private String PhotoPath;
 
     public User() {}
 
@@ -62,12 +61,4 @@ public class User {
     public double getBalance() { return balance; }
     public void setBalance(double balance) { this.balance = balance; }
 
-    // Optional: helper for displaying profile photo in Dashboard
-    public String getPhotoPath() {
-        return photo;
-    }
-
-    public void setPhotoPath(String path) {
-        this.photo = path;
-    }
 }
